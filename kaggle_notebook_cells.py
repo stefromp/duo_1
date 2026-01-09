@@ -6,6 +6,10 @@ Copy and paste these cells into your Kaggle notebook
 # ============================================================================
 # CELL 1: Clone Repository (Dataset included - 79 MB)
 # ============================================================================
+# Clean up any previous clones first
+!rm -rf duo_1
+
+# Clone fresh
 !git clone https://github.com/stefromp/duo_1.git
 %cd duo_1
 
