@@ -15,4 +15,4 @@ python -u main.py \
   algo.curriculum_end=15000 \
   training.ema=0.9999 \
   eval.generate_samples=False \
-  +wandb.offline=false
+  wandb.offline=false

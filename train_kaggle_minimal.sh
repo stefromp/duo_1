@@ -21,4 +21,4 @@ python -u main.py \
   trainer.precision='32' \
   training.ema=0.999 \
   eval.generate_samples=False \
-  +wandb.offline=true
+  wandb.offline=true

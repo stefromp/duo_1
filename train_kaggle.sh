@@ -14,4 +14,4 @@ python -u main.py \
   trainer.max_steps=50000 \
   trainer.val_check_interval=1000 \
   trainer.precision='32' \
-  +wandb.offline=false
+  wandb.offline=false

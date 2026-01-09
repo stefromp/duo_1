@@ -73,7 +73,7 @@ print("\n=== Setup Complete! ===")
   trainer.precision='32' \
   training.ema=0.999 \
   eval.generate_samples=False \
-  +wandb.offline=true
+  wandb.offline=true
 
 # ============================================================================
 # CELL 4 (ALTERNATIVE): Standard Training - More Resources
@@ -93,7 +93,7 @@ print("\n=== Setup Complete! ===")
   algo=duo_kaggle \
   trainer.max_steps=50000 \
   trainer.val_check_interval=1000 \
-  +wandb.offline=false
+  wandb.offline=false
 """
 
 # ============================================================================
@@ -123,7 +123,7 @@ checkpoint_path = "outputs/custom/2024.01.09/123456/checkpoints/last.ckpt"
   sampling.steps=50 \
   sampling.num_sample_batches=2 \
   loader.eval_batch_size=4 \
-  +wandb.offline=true
+  wandb.offline=true
 """
 
 # ============================================================================
