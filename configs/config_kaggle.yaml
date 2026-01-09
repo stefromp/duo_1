@@ -96,3 +96,5 @@ hydra:
 
 checkpointing:
   save_dir: ${cwd:}
+  resume_from_ckpt: false
+  resume_ckpt_path: null
