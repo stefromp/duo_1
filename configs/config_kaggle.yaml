@@ -1,0 +1,98 @@
+# Kaggle-optimized configuration for single GPU training
+defaults:
+  - _self_
+  - /callbacks: [checkpoint_every_n_steps, learning_rate_monitor]
+  - /data: custom_local
+  - /model: tiny  # Use tiny model for resource constraints
+  - /strategy: ddp
+  - /noise: log-linear
+  - /lr_scheduler: constant_warmup
+  - /prior: none
+  - /algo: duo
+
+mode: train  # train / ppl_eval / sample_eval
+
+seed: 1
+
+loader:
+  global_batch_size: 32  # Reduced for single GPU
+  eval_global_batch_size: 16  # Even smaller for evaluation
+  batch_size: 8  # Per-device batch size (will accumulate gradients)
+  eval_batch_size: 8
+  num_workers: 2  # Kaggle typically has 2 cores
+  pin_memory: True
+
+sampling:
+  predictor: ancestral
+  steps: 100  # Fewer steps for faster sampling during validation
+  noise_removal: greedy
+  use_float64: False  # Use float32 to save memory
+  p_nucleus: 1.0
+  num_sample_batches: 1  # Reduce sampling batches
+  num_sample_log: 1
+  semi_ar: False
+  stride_length: 1
+  num_strides: 1
+
+training:
+  ema: 0.9999
+  antithetic_sampling: True
+  importance_sampling: False
+  sampling_eps: 1e-3
+  change_of_variables: False
+  loss_precision: 'float32'  # Use float32 instead of bf16 for compatibility
+  finetune_path: ''
+
+eval:
+  checkpoint_path: ''
+  disable_ema: False
+  compute_generative_perplexity: False
+  perplexity_batch_size: 4
+  compute_perplexity_on_sanity: False
+  gen_ppl_eval_model_name_or_path: gpt2  # Use smaller model for eval
+  generate_samples: False  # Disable to speed up training
+  generated_samples_path: ${cwd:}/samples.json
+
+optim:
+  weight_decay: 0
+  lr: 3e-4
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1e-8
+
+trainer:
+  _target_: lightning.Trainer
+  accelerator: cuda
+  num_nodes: 1
+  devices: 1  # Single GPU for Kaggle
+  accumulate_grad_batches: 4  # Accumulate gradients to simulate larger batch
+  gradient_clip_val: 1.0
+  precision: '32'  # float32 for better compatibility
+  num_sanity_val_steps: 1
+  max_steps: 50000  # Reduced training steps
+  log_every_n_steps: 50
+  limit_train_batches: 1.0
+  limit_val_batches: 0.1  # Only validate on 10% of validation data
+  val_check_interval: 1000  # Validate every 1000 steps
+
+wandb:
+  project: duo-kaggle
+  notes: DUO training on Kaggle with custom dataset
+  group: kaggle-experiments
+  job_type: train
+  name: duo-custom-tiny
+  id: ${.name}_${seed}
+  tags:
+    - kaggle
+    - custom-data
+    - tiny-model
+  offline: False  # Set to True if you don't want to log to WandB
+
+hydra:
+  run:
+    dir: ./outputs/custom/${now:%Y.%m.%d}/${now:%H%M%S}
+  job:
+    chdir: true
+
+checkpointing:
+  save_dir: ${cwd:}

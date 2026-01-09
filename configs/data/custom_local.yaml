@@ -1,0 +1,14 @@
+# Custom dataset configuration for local training data
+train: custom_local
+valid: custom_local
+tokenizer_name_or_path: gpt2
+cache_dir: ./cache  # Will use local cache directory
+wrap: True
+streaming: False
+insert_train_eos: True
+insert_valid_eos: True
+
+# Paths to your custom data files
+# Note: If your folder has a space in the name, enclose in quotes or rename it
+train_file: "processed_data /train_subset_clean.txt"
+valid_file: "processed_data /train_subset_clean.txt"  # Using same file for validation (you can split it later)

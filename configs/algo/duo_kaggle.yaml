@@ -1,0 +1,17 @@
+# DUO configuration optimized for Kaggle
+name: duo
+backbone: dit
+parameterization: mean
+time_conditioning: True
+T: 0  # Continuous time
+subs_masking: False
+causal_attention: False
+gumbel_tau_log10_start: -2.0  # Simplified curriculum
+gumbel_tau_log10_end: -2.5
+curriculum_start: 5000  # Shorter curriculum for limited resources
+curriculum_end: 15000
+integral_cache_path: ${hydra:runtime.cwd}/integral/gpt2.pkl
+loss_type: elbo
+ignore_bos: False
+gamma_min: -3.5
+gamma_max: -1.75
