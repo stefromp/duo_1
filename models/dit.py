@@ -2,8 +2,13 @@ import math
 import typing
 
 import einops
-import flash_attn
-import flash_attn.layers.rotary
+try:
+    import flash_attn
+    import flash_attn.layers.rotary
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
+    print("Warning: flash_attn not available. Using standard attention instead.")
 import huggingface_hub
 import omegaconf
 import torch
@@ -117,18 +122,48 @@ def split_and_apply_rotary_pos_emb(qkv, rotary_cos_sin):
     cos = cos[0,:,0,0,:cos.shape[-1]//2]
     sin = sin[0,:,0,0,:sin.shape[-1]//2]
     q, k, v = qkv.chunk(3, dim=2)
-    q = flash_attn.layers.rotary.apply_rotary_emb_torch(
-      q.squeeze(dim=2), cos, sin)
-    k = flash_attn.layers.rotary.apply_rotary_emb_torch(
-      k.squeeze(dim=2), cos, sin)
+    
+    if FLASH_ATTN_AVAILABLE:
+      q = flash_attn.layers.rotary.apply_rotary_emb_torch(
+        q.squeeze(dim=2), cos, sin)
+      k = flash_attn.layers.rotary.apply_rotary_emb_torch(
+        k.squeeze(dim=2), cos, sin)
+    else:
+      # Fallback: manual rotary embedding application
+      q = apply_rotary_emb_manual(q.squeeze(dim=2), cos, sin)
+      k = apply_rotary_emb_manual(k.squeeze(dim=2), cos, sin)
+    
     v = v.squeeze(dim=2)
   return q, k, v
+
+
+def apply_rotary_emb_manual(x, cos, sin):
+  """Manual implementation of rotary embeddings when flash_attn is not available"""
+  # x shape: [batch, seq_len, num_heads, head_dim]
+  # cos, sin shape: [seq_len, head_dim//2]
+  x_half = x.shape[-1] // 2
+  x1, x2 = x[..., :x_half], x[..., x_half:]
+  
+  # Apply rotation
+  x_rotated = torch.cat([
+    x1 * cos.unsqueeze(0).unsqueeze(2) - x2 * sin.unsqueeze(0).unsqueeze(2),
+    x2 * cos.unsqueeze(0).unsqueeze(2) + x1 * sin.unsqueeze(0).unsqueeze(2)
+  ], dim=-1)
+  return x_rotated
 
 
 def apply_rotary_pos_emb(qkv, cos, sin):
   cos = cos[0,:,0,0,:cos.shape[-1]//2]
   sin = sin[0,:,0,0,:sin.shape[-1]//2]
-  return flash_attn.layers.rotary.apply_rotary_emb_qkv_(qkv, cos, sin)
+  
+  if FLASH_ATTN_AVAILABLE:
+    return flash_attn.layers.rotary.apply_rotary_emb_qkv_(qkv, cos, sin)
+  else:
+    # Fallback: apply rotary to q and k separately
+    q, k, v = qkv.unbind(dim=2)
+    q = apply_rotary_emb_manual(q, cos, sin)
+    k = apply_rotary_emb_manual(k, cos, sin)
+    return torch.stack([q, k, v], dim=2)
 
 
 def regular_attention_multi_headed(q, k, v):
@@ -285,8 +320,16 @@ class DDiTBlockCausal(nn.Module):
     cu_seqlens = torch.arange(
       0, (batch_size + 1) * seq_len,
       step=seq_len, dtype=torch.int32, device=qkv.device)
-    x = flash_attn.flash_attn_interface.flash_attn_varlen_qkvpacked_func(
-      qkv, cu_seqlens, seq_len, 0.0, causal=True)
+    
+    if FLASH_ATTN_AVAILABLE:
+      x = flash_attn.flash_attn_interface.flash_attn_varlen_qkvpacked_func(
+        qkv, cu_seqlens, seq_len, 0.0, causal=True)
+    else:
+      # Fallback: use PyTorch's scaled_dot_product_attention (SDPA)
+      q, k, v = qkv.unbind(dim=1)  # Split qkv
+      x = F.scaled_dot_product_attention(
+        q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
+      )
 
     x = einops.rearrange(x, '(b s) h d -> b s (h d)',
                          b=batch_size)

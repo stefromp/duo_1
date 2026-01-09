@@ -4,50 +4,24 @@ Copy and paste these cells into your Kaggle notebook
 """
 
 # ============================================================================
-# CELL 1: Clone Repository
+# CELL 1: Clone Repository (Dataset included - 79 MB)
 # ============================================================================
-!git clone https://github.com/kuleshov-group/mdlm.git duo-main
-%cd duo-main
+!git clone https://github.com/stefromp/duo_1.git
+%cd duo_1
 
 # ============================================================================
 # CELL 2: Install Dependencies
 # ============================================================================
 !pip install -q -r requirements.txt
-# Flash attention is optional but speeds up training
-!pip install -q flash-attn --no-build-isolation || echo "Flash attention skipped"
+
+# Note: Flash Attention is NOT needed!
+# PyTorch 2.3+ includes optimized SDPA (Scaled Dot Product Attention)
+# which is almost as fast and requires no compilation.
+# If you want Flash Attention anyway (optional, takes 10+ minutes):
+# !pip install -q flash-attn --no-build-isolation
 
 # ============================================================================
-# CELL 3: Upload Your Dataset
-# ============================================================================
-# Option A: If you uploaded as a Kaggle Dataset
-# !mkdir -p "processed_data "
-# !cp /kaggle/input/your-dataset-name/train_subset_clean.txt "processed_data /train_subset_clean.txt"
-
-# Option B: If you uploaded directly to notebook (use upload button in Kaggle)
-# It will be in /kaggle/working/ or /kaggle/input/
-
-# Option C: Create from uploaded file
-import shutil
-import os
-
-# Adjust this path to where your file actually is after upload
-source_file = "/kaggle/input/your-dataset/train_subset_clean.txt"
-target_dir = "processed_data "
-target_file = os.path.join(target_dir, "train_subset_clean.txt")
-
-if not os.path.exists(target_dir):
-    os.makedirs(target_dir)
-    print(f"Created directory: {target_dir}")
-
-if os.path.exists(source_file):
-    shutil.copy(source_file, target_file)
-    print(f"Copied dataset to: {target_file}")
-else:
-    print(f"WARNING: Source file not found at {source_file}")
-    print("Please upload your dataset and update the source_file path")
-
-# ============================================================================
-# CELL 4: Verify Setup
+# CELL 3: Verify Setup (Dataset already included in repo!)
 # ============================================================================
 import os
 
@@ -74,7 +48,7 @@ else:
 print("\n=== Setup Complete! ===")
 
 # ============================================================================
-# CELL 5: Start Training - Minimal Resources (RECOMMENDED FOR FIRST RUN)
+# CELL 4: Start Training - Minimal Resources (RECOMMENDED FOR FIRST RUN)
 # ============================================================================
 # This uses the most conservative settings
 # Memory usage: ~8-10 GB
@@ -102,7 +76,7 @@ print("\n=== Setup Complete! ===")
   +wandb.offline=true
 
 # ============================================================================
-# CELL 5 (ALTERNATIVE): Standard Training - More Resources
+# CELL 4 (ALTERNATIVE): Standard Training - More Resources
 # ============================================================================
 # Use this if minimal works well and you want faster training
 # Memory usage: ~12-14 GB
@@ -123,7 +97,7 @@ print("\n=== Setup Complete! ===")
 """
 
 # ============================================================================
-# CELL 6: Monitor Training (Run in separate cell while training)
+# CELL 5: Monitor Training (Run in separate cell while training)
 # ============================================================================
 """
 # Check GPU memory usage
@@ -137,7 +111,7 @@ print("\n=== Setup Complete! ===")
 """
 
 # ============================================================================
-# CELL 7: Generate Samples After Training
+# CELL 6: Generate Samples After Training
 # ============================================================================
 """
 # Replace with your actual checkpoint path
@@ -153,7 +127,7 @@ checkpoint_path = "outputs/custom/2024.01.09/123456/checkpoints/last.ckpt"
 """
 
 # ============================================================================
-# CELL 8: Save Checkpoints
+# CELL 7: Save Checkpoints
 # ============================================================================
 """
 # Create a zip file of all checkpoints
@@ -168,7 +142,7 @@ checkpoint_path = "outputs/custom/2024.01.09/123456/checkpoints/last.ckpt"
 """
 
 # ============================================================================
-# CELL 9: Resume Training (if session disconnected)
+# CELL 8: Resume Training (if session disconnected)
 # ============================================================================
 """
 # Find your checkpoint path
