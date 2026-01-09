@@ -6,7 +6,6 @@ python -u main.py \
   --config-name=config_kaggle \
   loader.batch_size=4 \
   loader.eval_batch_size=4 \
-  loader.global_batch_size=16 \
   data=custom_local \
   model=tiny \
   model.length=256 \
