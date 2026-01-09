@@ -693,7 +693,9 @@ def get_tokenizer(config):
 
 def get_dataloaders(config, tokenizer, skip_train=False,
                     skip_valid=False, valid_seed=None):
-  num_gpus = torch.cuda.device_count()
+  # Use config.trainer.devices instead of torch.cuda.device_count()
+  # to respect the user's device configuration
+  num_gpus = config.trainer.devices if hasattr(config.trainer, 'devices') else torch.cuda.device_count()
   assert (config.loader.global_batch_size
           == (config.loader.batch_size
               * config.trainer.num_nodes
