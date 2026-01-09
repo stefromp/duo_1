@@ -12,6 +12,7 @@ from typing import Optional
 
 import datasets
 import fsspec
+import hydra
 import numpy as np
 import requests
 import tokenizers
@@ -523,6 +524,12 @@ def get_dataset(dataset_name,
       data_file = custom_valid_file
     else:
       raise ValueError(f'No file specified for mode={mode} in custom_local dataset')
+    
+    # Convert to absolute path if relative (Hydra changes working directory)
+    if not os.path.isabs(data_file):
+      # Get the original working directory from hydra
+      original_cwd = hydra.utils.get_original_cwd()
+      data_file = os.path.join(original_cwd, data_file)
     
     LOGGER.info(f'Loading data from: {data_file}')
     dataset = datasets.load_dataset(
