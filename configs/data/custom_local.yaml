@@ -10,4 +10,4 @@ insert_valid_eos: True
 
 # Paths to your custom data files
 train_file: "processed_data/train_subset_clean.txt"
-valid_file: "processed_data/train_subset_clean.txt"  # Using same file for validation (you can split it later)
+valid_file: "processed_data/val_subset_clean.txt"  # Separate validation dataset
