@@ -90,11 +90,11 @@ wandb:
 
 hydra:
   run:
-    dir: ./outputs/custom/${now:%Y.%m.%d}/${now:%H%M%S}
+    dir: /kaggle/working/outputs/${now:%Y.%m.%d}/${now:%H%M%S}
   job:
-    chdir: true
+    chdir: false  # CRITICAL: Don't change directory on Kaggle
 
 checkpointing:
-  save_dir: ${cwd:}
+  save_dir: /kaggle/working/checkpoints  # Save directly to persistent location
   resume_from_ckpt: false
   resume_ckpt_path: null
