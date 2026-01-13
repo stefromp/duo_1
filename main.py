@@ -70,21 +70,16 @@ def _print_config(
 
 
 @L.pytorch.utilities.rank_zero_only
-def _print_batch(train_ds, valid_ds, tokenizer, k=64,
-                 print_valid=False):
-  dataloaders = [('train', train_ds)]
-  if print_valid:
-    dataloaders.append(('valid', valid_ds))
-  for dl_type, dl in dataloaders:
-    print(f'Printing {dl_type} dataloader batch.')
-    batch = next(iter(dl))
-    print('Batch input_ids.shape', batch['input_ids'].shape)
-    first = batch['input_ids'][0, :k]
-    last = batch['input_ids'][0, -k:]
-    print(f'First {k} tokens:', tokenizer.decode(first))
-    print('ids:', first)
-    print(f'Last {k} tokens:', tokenizer.decode(last))
-    print('ids:', last)
+def _print_batch(train_ds, tokenizer, k=64):
+  print('Printing train dataloader batch.')
+  batch = next(iter(train_ds))
+  print('Batch input_ids.shape', batch['input_ids'].shape)
+  first = batch['input_ids'][0, :k]
+  last = batch['input_ids'][0, -k:]
+  print(f'First {k} tokens:', tokenizer.decode(first))
+  print('ids:', first)
+  print(f'Last {k} tokens:', tokenizer.decode(last))
+  print('ids:', last)
 
 
 def _generate_samples(diffusion_model, config, logger,
@@ -161,6 +156,7 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
+    enable_progress_bar=False,
     logger=wandb_logger)
   _, valid_ds = dataloader.get_dataloaders(
     config, tokenizer, skip_train=True, valid_seed=config.seed)
@@ -191,7 +187,7 @@ def _train(diffusion_model, config, logger, tokenizer):
 
   train_ds, valid_ds = dataloader.get_dataloaders(
     config, tokenizer)
-  _print_batch(train_ds, valid_ds, tokenizer)
+  _print_batch(train_ds, tokenizer)
 
   if config.training.finetune_path != '':
     assert utils.fsspec_exists(config.training.finetune_path)
@@ -207,6 +203,7 @@ def _train(diffusion_model, config, logger, tokenizer):
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
+    enable_progress_bar=False,
     logger=wandb_logger)
   trainer.fit(model, train_ds, valid_ds, ckpt_path=ckpt_path)
 
