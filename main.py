@@ -208,6 +208,7 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
+    enable_progress_bar=True,
     logger=wandb_logger)
   _, valid_ds = dataloader.get_dataloaders(
     config, tokenizer, skip_train=True, valid_seed=config.seed)
@@ -255,6 +256,7 @@ def _train(diffusion_model, config, logger, tokenizer):
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
+    enable_progress_bar=True,
     logger=wandb_logger)
   trainer.fit(model, train_ds, valid_ds, ckpt_path=ckpt_path)
 
