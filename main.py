@@ -13,6 +13,31 @@ import algo
 import dataloader
 import utils
 
+
+# Callback that prints only epoch-level progress (no batch progress bars)
+class EpochPrinter(L.pytorch.callbacks.Callback):
+  def __init__(self, logger=None):
+    super().__init__()
+    # allow passing a logger (main creates one and passes it in)
+    self._logger = logger if logger is not None else utils.get_logger(__name__)
+
+  def on_train_epoch_start(self, trainer, pl_module):
+    epoch = getattr(trainer, 'current_epoch', None)
+    max_epochs = getattr(trainer, 'max_epochs', None)
+    total = max_epochs if (max_epochs and max_epochs > 0) else '?'
+    try:
+      # current_epoch is 0-indexed
+      self._logger.info(f'Epoch {epoch + 1}/{total}')
+    except Exception:
+      self._logger.info(f'Epoch {epoch}/{total}')
+
+  def on_validation_epoch_start(self, trainer, pl_module):
+    epoch = getattr(trainer, 'current_epoch', None)
+    try:
+      self._logger.info(f'Validation epoch {epoch + 1} starting')
+    except Exception:
+      self._logger.info(f'Validation epoch {epoch} starting')
+
 omegaconf.OmegaConf.register_new_resolver(
   'cwd', os.getcwd)
 omegaconf.OmegaConf.register_new_resolver(
@@ -151,6 +176,7 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
+  callbacks.append(EpochPrinter(logger=logger))
   trainer = hydra.utils.instantiate(
     config.trainer,
     default_root_dir=os.getcwd(),
@@ -184,6 +210,7 @@ def _train(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
+  callbacks.append(EpochPrinter(logger=logger))
 
   train_ds, valid_ds = dataloader.get_dataloaders(
     config, tokenizer)
