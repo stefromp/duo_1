@@ -70,9 +70,12 @@ def _print_config(
 
 
 @L.pytorch.utilities.rank_zero_only
-def _print_batch(train_ds, valid_ds, tokenizer, k=64):
-  for dl_type, dl in [
-    ('train', train_ds), ('valid', valid_ds)]:
+def _print_batch(train_ds, valid_ds, tokenizer, k=64,
+                 print_valid=False):
+  dataloaders = [('train', train_ds)]
+  if print_valid:
+    dataloaders.append(('valid', valid_ds))
+  for dl_type, dl in dataloaders:
     print(f'Printing {dl_type} dataloader batch.')
     batch = next(iter(dl))
     print('Batch input_ids.shape', batch['input_ids'].shape)
