@@ -173,14 +173,14 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
-  # add our epoch-only progress bar (disable Lightning's auto bar)
+  # add our epoch-only progress bar
   callbacks.append(EpochOnlyTQDM())
   trainer = hydra.utils.instantiate(
     config.trainer,
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
-    enable_progress_bar=False,
+    enable_progress_bar=True,
     logger=wandb_logger)
   _, valid_ds = dataloader.get_dataloaders(
     config, tokenizer, skip_train=True, valid_seed=config.seed)
