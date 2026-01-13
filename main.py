@@ -13,93 +13,27 @@ import algo
 import dataloader
 import utils
 try:
-  from tqdm import tqdm as _tqdm_cls
+  import tqdm as _tqdm_module
+  _tqdm_cls = _tqdm_module.tqdm
 except Exception:
+  _tqdm_module = None
   _tqdm_cls = None
 
+from lightning.pytorch.callbacks.progress.tqdm_progress import TQDMProgressBar
 
-# Callback to suppress per-batch progress bars during validation
-# Keeps the trainer's epoch-level progress bar active.
-class ValidationProgressSuppressor(L.pytorch.callbacks.Callback):
-  def _set_disable_flag(self, trainer, value: bool):
-    # Best-effort: try common attributes used by Lightning/TQDM/Rich bars
-    try:
-      # trainer may expose a top-level enable_progress_bar attribute
-      if hasattr(trainer, 'enable_progress_bar'):
-        trainer.enable_progress_bar = not value
-    except Exception:
-      pass
 
-    try:
-      # Try progress_bar_callback if available
-      pbar = getattr(trainer, 'progress_bar_callback', None)
-      cbs = list(getattr(trainer, 'callbacks', []) or [])
-      if pbar is not None:
-        cbs.insert(0, pbar)
+# Custom progress bar: show the normal training/epoch progress but return a
+# disabled tqdm for validation so no per-batch validation bars are printed.
+class EpochOnlyTQDM(TQDMProgressBar):
+  def init_validation_tqdm(self):
+    # return a disabled tqdm instance (keeps attributes like nrows present)
+    if _tqdm_cls is not None:
+      return _tqdm_cls(disable=True)
+    # fallback: call parent (may show bars)
+    return super().init_validation_tqdm()
 
-      # Iterate through callbacks and try to disable any progress/tqdm/rich bars we find
-      for cb in cbs:
-        try:
-          # 1) direct attribute on callback
-          if hasattr(cb, 'disable'):
-            try:
-              cb.disable = value
-            except Exception:
-              setattr(cb, 'disable', value)
 
-          # 2) common inner attributes that may hold tqdm objects
-          for attr_name in ('main_progress_bar', 'val_progress_bar', 'train_progress_bar', 'progress_bar'):
-            attr = getattr(cb, attr_name, None)
-            if attr is None:
-              continue
-            # If attr itself has disable
-            if hasattr(attr, 'disable'):
-              try:
-                attr.disable = value
-              except Exception:
-                setattr(attr, 'disable', value)
-              continue
-            # If attr is a tqdm instance
-            try:
-              if _tqdm_cls is not None and isinstance(attr, _tqdm_cls):
-                try:
-                  attr.disable = value
-                except Exception:
-                  setattr(attr, 'disable', value)
-                continue
-            except Exception:
-              pass
 
-          # 3) inspect callback's attributes for any tqdm-like objects
-          for name, obj in getattr(cb, '__dict__', {}).items():
-            if obj is None:
-              continue
-            if hasattr(obj, 'disable'):
-              try:
-                setattr(obj, 'disable', value)
-              except Exception:
-                pass
-            else:
-              try:
-                if _tqdm_cls is not None and isinstance(obj, _tqdm_cls):
-                  try:
-                    obj.disable = value
-                  except Exception:
-                    setattr(obj, 'disable', value)
-              except Exception:
-                pass
-        except Exception:
-          # swallow per-callback errors
-          continue
-    except Exception:
-      # swallow any exception - it's best-effort
-      pass
-
-  def on_validation_start(self, trainer, pl_module):
-    self._set_disable_flag(trainer, True)
-
-  def on_validation_end(self, trainer, pl_module):
-    self._set_disable_flag(trainer, False)
 
 omegaconf.OmegaConf.register_new_resolver(
   'cwd', os.getcwd)
@@ -239,13 +173,14 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
-  callbacks.append(ValidationProgressSuppressor())
+  # add our epoch-only progress bar (disable Lightning's auto bar)
+  callbacks.append(EpochOnlyTQDM())
   trainer = hydra.utils.instantiate(
     config.trainer,
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
-    enable_progress_bar=True,
+    enable_progress_bar=False,
     logger=wandb_logger)
   _, valid_ds = dataloader.get_dataloaders(
     config, tokenizer, skip_train=True, valid_seed=config.seed)
@@ -273,7 +208,8 @@ def _train(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
-  callbacks.append(ValidationProgressSuppressor())
+  # add our epoch-only progress bar (disable Lightning's auto bar)
+  callbacks.append(EpochOnlyTQDM())
 
   train_ds, valid_ds = dataloader.get_dataloaders(
     config, tokenizer)
