@@ -14,29 +14,55 @@ import dataloader
 import utils
 
 
-# Callback that prints only epoch-level progress (no batch progress bars)
-class EpochPrinter(L.pytorch.callbacks.Callback):
-  def __init__(self, logger=None):
-    super().__init__()
-    # allow passing a logger (main creates one and passes it in)
-    self._logger = logger if logger is not None else utils.get_logger(__name__)
-
-  def on_train_epoch_start(self, trainer, pl_module):
-    epoch = getattr(trainer, 'current_epoch', None)
-    max_epochs = getattr(trainer, 'max_epochs', None)
-    total = max_epochs if (max_epochs and max_epochs > 0) else '?'
+# Callback to suppress per-batch progress bars during validation
+# Keeps the trainer's epoch-level progress bar active.
+class ValidationProgressSuppressor(L.pytorch.callbacks.Callback):
+  def _set_disable_flag(self, trainer, value: bool):
+    # Best-effort: try common attributes used by Lightning/TQDM/Rich bars
     try:
-      # current_epoch is 0-indexed
-      self._logger.info(f'Epoch {epoch + 1}/{total}')
+      # trainer may expose a top-level enable_progress_bar attribute
+      if hasattr(trainer, 'enable_progress_bar'):
+        trainer.enable_progress_bar = not value
     except Exception:
-      self._logger.info(f'Epoch {epoch}/{total}')
+      pass
 
-  def on_validation_epoch_start(self, trainer, pl_module):
-    epoch = getattr(trainer, 'current_epoch', None)
     try:
-      self._logger.info(f'Validation epoch {epoch + 1} starting')
+      pbar = getattr(trainer, 'progress_bar_callback', None)
+      if pbar is None:
+        # Lightning <-> v2 differences: try trainer.callbacks
+        for cb in getattr(trainer, 'callbacks', []) or []:
+          name = cb.__class__.__name__.lower()
+          if 'progress' in name or 'tqdm' in name or 'rich' in name:
+            pbar = cb
+            break
+      if pbar is None:
+        return
+
+      # direct disable if attribute exists
+      if hasattr(pbar, 'disable'):
+        try:
+          pbar.disable = value
+        except Exception:
+          setattr(pbar, 'disable', value)
+        return
+
+      # try toggling inner bars (tqdm/rich implementations)
+      for attr in ('main_progress_bar', 'val_progress_bar', 'train_progress_bar'):
+        bar = getattr(pbar, attr, None)
+        if bar is not None and hasattr(bar, 'disable'):
+          try:
+            bar.disable = value
+          except Exception:
+            setattr(bar, 'disable', value)
     except Exception:
-      self._logger.info(f'Validation epoch {epoch} starting')
+      # swallow any exception - it's best-effort
+      pass
+
+  def on_validation_start(self, trainer, pl_module):
+    self._set_disable_flag(trainer, True)
+
+  def on_validation_end(self, trainer, pl_module):
+    self._set_disable_flag(trainer, False)
 
 omegaconf.OmegaConf.register_new_resolver(
   'cwd', os.getcwd)
@@ -176,13 +202,12 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
-  callbacks.append(EpochPrinter(logger=logger))
+  callbacks.append(ValidationProgressSuppressor())
   trainer = hydra.utils.instantiate(
     config.trainer,
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
-    enable_progress_bar=False,
     logger=wandb_logger)
   _, valid_ds = dataloader.get_dataloaders(
     config, tokenizer, skip_train=True, valid_seed=config.seed)
@@ -210,7 +235,7 @@ def _train(diffusion_model, config, logger, tokenizer):
   if 'callbacks' in config:
     for _, callback in config.callbacks.items():
       callbacks.append(hydra.utils.instantiate(callback))
-  callbacks.append(EpochPrinter(logger=logger))
+  callbacks.append(ValidationProgressSuppressor())
 
   train_ds, valid_ds = dataloader.get_dataloaders(
     config, tokenizer)
@@ -230,7 +255,6 @@ def _train(diffusion_model, config, logger, tokenizer):
     default_root_dir=os.getcwd(),
     callbacks=callbacks,
     strategy=hydra.utils.instantiate(config.strategy),
-    enable_progress_bar=False,
     logger=wandb_logger)
   trainer.fit(model, train_ds, valid_ds, ckpt_path=ckpt_path)
 

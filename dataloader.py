@@ -11,6 +11,8 @@ import zipfile
 from typing import Optional
 
 import datasets
+from datasets import logging as _datasets_logging
+_datasets_logging.disable_progress_bar()
 import fsspec
 import hydra
 import numpy as np
