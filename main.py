@@ -12,6 +12,10 @@ import torch
 import algo
 import dataloader
 import utils
+try:
+  from tqdm import tqdm as _tqdm_cls
+except Exception:
+  _tqdm_cls = None
 
 
 # Callback to suppress per-batch progress bars during validation
@@ -27,33 +31,66 @@ class ValidationProgressSuppressor(L.pytorch.callbacks.Callback):
       pass
 
     try:
+      # Try progress_bar_callback if available
       pbar = getattr(trainer, 'progress_bar_callback', None)
-      if pbar is None:
-        # Lightning <-> v2 differences: try trainer.callbacks
-        for cb in getattr(trainer, 'callbacks', []) or []:
-          name = cb.__class__.__name__.lower()
-          if 'progress' in name or 'tqdm' in name or 'rich' in name:
-            pbar = cb
-            break
-      if pbar is None:
-        return
+      cbs = list(getattr(trainer, 'callbacks', []) or [])
+      if pbar is not None:
+        cbs.insert(0, pbar)
 
-      # direct disable if attribute exists
-      if hasattr(pbar, 'disable'):
+      # Iterate through callbacks and try to disable any progress/tqdm/rich bars we find
+      for cb in cbs:
         try:
-          pbar.disable = value
-        except Exception:
-          setattr(pbar, 'disable', value)
-        return
+          # 1) direct attribute on callback
+          if hasattr(cb, 'disable'):
+            try:
+              cb.disable = value
+            except Exception:
+              setattr(cb, 'disable', value)
 
-      # try toggling inner bars (tqdm/rich implementations)
-      for attr in ('main_progress_bar', 'val_progress_bar', 'train_progress_bar'):
-        bar = getattr(pbar, attr, None)
-        if bar is not None and hasattr(bar, 'disable'):
-          try:
-            bar.disable = value
-          except Exception:
-            setattr(bar, 'disable', value)
+          # 2) common inner attributes that may hold tqdm objects
+          for attr_name in ('main_progress_bar', 'val_progress_bar', 'train_progress_bar', 'progress_bar'):
+            attr = getattr(cb, attr_name, None)
+            if attr is None:
+              continue
+            # If attr itself has disable
+            if hasattr(attr, 'disable'):
+              try:
+                attr.disable = value
+              except Exception:
+                setattr(attr, 'disable', value)
+              continue
+            # If attr is a tqdm instance
+            try:
+              if _tqdm_cls is not None and isinstance(attr, _tqdm_cls):
+                try:
+                  attr.disable = value
+                except Exception:
+                  setattr(attr, 'disable', value)
+                continue
+            except Exception:
+              pass
+
+          # 3) inspect callback's attributes for any tqdm-like objects
+          for name, obj in getattr(cb, '__dict__', {}).items():
+            if obj is None:
+              continue
+            if hasattr(obj, 'disable'):
+              try:
+                setattr(obj, 'disable', value)
+              except Exception:
+                pass
+            else:
+              try:
+                if _tqdm_cls is not None and isinstance(obj, _tqdm_cls):
+                  try:
+                    obj.disable = value
+                  except Exception:
+                    setattr(obj, 'disable', value)
+              except Exception:
+                pass
+        except Exception:
+          # swallow per-callback errors
+          continue
     except Exception:
       # swallow any exception - it's best-effort
       pass
