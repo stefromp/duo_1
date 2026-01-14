@@ -38,8 +38,12 @@ class AR(trainer_base.TrainerBase):
     return input_tokens, output_tokens, valid_tokens
 
   def nll(self, input_tokens, output_tokens,
-          current_accumulation_step):
+          current_accumulation_step=None, train_mode=False):
+    # Keep signature compatible with TrainerBase._loss which passes
+    # (current_accumulation_step, train_mode). We don't use
+    # current_accumulation_step or train_mode in AR, so just ignore them.
     del current_accumulation_step
+    del train_mode
     output = self.backbone(input_tokens, None)
     output[:, :, self.mask_index] = self.neg_infinity
     output = output.log_softmax(-1)
