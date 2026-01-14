@@ -778,13 +778,26 @@ def get_dataloaders(config, tokenizer, skip_train=False,
     else:
       shuffle_valid = True
       generator = torch.Generator().manual_seed(valid_seed)
-    valid_loader = torch.utils.data.DataLoader(
-      valid_set,
-      batch_size=config.loader.eval_batch_size,
-      num_workers=config.loader.num_workers,
-      pin_memory=config.loader.pin_memory,
-      shuffle=shuffle_valid,
-      generator=generator)
+
+    # For validation we prefer a deterministic, sequential sampler when
+    # shuffling is not requested. This avoids Lightning emitting a warning
+    # that the val_dataloader's sampler has shuffling enabled and makes
+    # evaluation order deterministic across runs.
+    if shuffle_valid:
+      valid_loader = torch.utils.data.DataLoader(
+        valid_set,
+        batch_size=config.loader.eval_batch_size,
+        num_workers=config.loader.num_workers,
+        pin_memory=config.loader.pin_memory,
+        shuffle=True,
+        generator=generator)
+    else:
+      valid_loader = torch.utils.data.DataLoader(
+        valid_set,
+        batch_size=config.loader.eval_batch_size,
+        num_workers=config.loader.num_workers,
+        pin_memory=config.loader.pin_memory,
+        sampler=torch.utils.data.SequentialSampler(valid_set))
     # Will be used in generative perplexity calculation
     valid_loader.tokenizer = tokenizer
 

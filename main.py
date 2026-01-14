@@ -242,6 +242,19 @@ def main(config):
   _print_config(config, resolve=True, save_cfg=True)
   
   logger = utils.get_logger(__name__)
+  # Safety: if the user explicitly set sampling.num_sample_batches to 0,
+  # ensure we do not accidentally generate samples even if
+  # config.eval.generate_samples is True. This prevents accidental
+  # long-running generation when the overrides are inconsistent.
+  try:
+    if getattr(config, 'sampling', None) is not None:
+      if getattr(config.sampling, 'num_sample_batches', 0) == 0:
+        if getattr(config.eval, 'generate_samples', False):
+          logger.info('sampling.num_sample_batches==0 -> forcing eval.generate_samples=False')
+          config.eval.generate_samples = False
+  except Exception:
+    # Keep execution robust in case config shape is unexpected
+    pass
   tokenizer = dataloader.get_tokenizer(config)
   if config.algo.name == 'ar':
     diffusion_model = algo.AR
