@@ -183,7 +183,7 @@ def _eval_ppl(diffusion_model, config, logger, tokenizer):
     enable_progress_bar=True,
     logger=wandb_logger)
   _, valid_ds = dataloader.get_dataloaders(
-    config, tokenizer, skip_train=True, valid_seed=config.seed)
+    config, tokenizer, skip_train=True, valid_seed=None)
   trainer.validate(model, valid_ds)
 
 
