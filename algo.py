@@ -2,6 +2,7 @@ import os
 import collections
 import copy
 import pickle
+import math
 
 import fsspec
 import numpy as np
@@ -10,6 +11,86 @@ import torch.nn.functional as F
 
 import trainer_base
 import utils
+
+
+# =============================================================================
+# Reweighted Loss Functions for Masked Diffusion
+# Based on: "Demystifying Diffusion Objectives: Reweighted Losses are Better
+# Variational Bounds" (Shi & Titsias, 2025)
+#
+# The standard ELBO uses w̃(t) = 1. Reweighted objectives use different w̃(t)
+# that satisfy monotonicity requirements for improved variational bounds.
+# =============================================================================
+
+def compute_loss_weight(alpha_t, dalpha_t, weighting_scheme='elbo', 
+                        sigmoid_k=0.0, eps=1e-6):
+  """Compute the loss weight w̃(t) for masked diffusion models.
+  
+  The masked diffusion loss has the form:
+    L = -(w̃(t) * α'_t / (1 - α_t)) * E[δ_{z_t,m} · x^T log μ_θ(z_t)]
+  
+  This function returns w̃(t) for different weighting schemes.
+  
+  Args:
+    alpha_t: Signal level α_t, shape (batch_size, 1) or (batch_size,)
+    dalpha_t: Time derivative of α_t (negative for forward process)
+    weighting_scheme: One of 'elbo', 'simple', 'fm', 'sigmoid', 'edm', 'iddpm'
+    sigmoid_k: Parameter k for sigmoid weighting (default 0)
+    eps: Small constant for numerical stability
+    
+  Returns:
+    weight: Loss weight w̃(t), same shape as alpha_t
+  """
+  # Ensure alpha_t is at least 2D for consistent broadcasting
+  if alpha_t.ndim == 1:
+    alpha_t = alpha_t.unsqueeze(-1)
+  
+  # Clamp alpha_t to avoid numerical issues at boundaries
+  alpha_t = alpha_t.clamp(eps, 1.0 - eps)
+  
+  if weighting_scheme == 'elbo':
+    # Standard ELBO: w̃(t) = 1
+    weight = torch.ones_like(alpha_t)
+    
+  elif weighting_scheme == 'simple':
+    # Simple weighting (best empirical results): w̃(t) = -(1 - α_t) / α'_t
+    # This makes the total CE weight flat across time for cosine schedules
+    # For log-linear schedule where α_t = 1 - t and α'_t = -1:
+    #   w̃(t) = -(1 - (1-t)) / (-1) = -t / (-1) = t = 1 - α_t
+    # So weight = (1 - α_t) / |α'_t|
+    weight = (1.0 - alpha_t) / (torch.abs(dalpha_t) + eps)
+    
+  elif weighting_scheme == 'fm':
+    # Flow Matching weighting: w̃(t) = sqrt((1 - α_t) / α_t)
+    weight = torch.sqrt((1.0 - alpha_t) / (alpha_t + eps))
+    
+  elif weighting_scheme == 'sigmoid':
+    # Sigmoid weighting: w̃(t) = (1 - α_t) / (1 - (1 - e^(-k)) * α_t)
+    # When k=0: w̃(t) = 1 - α_t (simplified form)
+    if sigmoid_k == 0:
+      weight = 1.0 - alpha_t
+    else:
+      weight = (1.0 - alpha_t) / (1.0 - (1.0 - math.exp(-sigmoid_k)) * alpha_t + eps)
+      
+  elif weighting_scheme == 'edm':
+    # EDM weighting matched from continuous diffusion
+    # log-SNR λ = log(α_t / (1 - α_t))
+    # w(λ) = sech(λ/2) → w(t) = 2 * sqrt(α_t * (1 - α_t))
+    weight = 2.0 * torch.sqrt(alpha_t * (1.0 - alpha_t) + eps)
+    
+  elif weighting_scheme == 'iddpm':
+    # IDDPM weighting (non-monotonic, not recommended)
+    # This is included for completeness but may hurt performance
+    # Uses a Gaussian in log-SNR space
+    log_snr = torch.log(alpha_t / (1.0 - alpha_t + eps) + eps)
+    # Gaussian centered at 2.4 with std 2.4
+    weight = torch.exp(-0.5 * ((log_snr - 2.4) / 2.4) ** 2)
+    
+  else:
+    raise ValueError(f"Unknown weighting scheme: {weighting_scheme}. "
+                     f"Choose from: elbo, simple, fm, sigmoid, edm, iddpm")
+  
+  return weight.squeeze(-1) if weight.shape[-1] == 1 else weight
 
 
 class AR(trainer_base.TrainerBase):
@@ -288,6 +369,9 @@ class SEDDAbsorb(trainer_base.AbsorbingState):
 class DUO_BASE(trainer_base.UniformState):
   def __init__(self, config, tokenizer):
     super().__init__(config, tokenizer)
+    # Get loss weighting scheme from config (default: 'elbo' for standard ELBO)
+    self.loss_weighting = getattr(config.algo, 'loss_weighting', 'elbo')
+    self.sigmoid_k = getattr(config.algo, 'sigmoid_k', 0.0)
     self._validate_configuration()
 
   def on_save_checkpoint(self, checkpoint):
@@ -370,6 +454,21 @@ class DUO_BASE(trainer_base.UniformState):
         xbar_theta_x.log() - xbar_theta_xt.log()) * x_neq_xt)
     term2 = term2_theta + term2_offset
     diffusion_loss = coeff * (term1 - term2)
+    
+    # Apply reweighted loss if configured
+    # Based on "Demystifying Diffusion Objectives" (Shi & Titsias, 2025)
+    if self.loss_weighting != 'elbo':
+      loss_weight = compute_loss_weight(
+        alpha_t=alpha_t,
+        dalpha_t=dalpha_t,
+        weighting_scheme=self.loss_weighting,
+        sigmoid_k=self.sigmoid_k
+      )
+      # Ensure weight has correct shape for broadcasting
+      if loss_weight.ndim == 1:
+        loss_weight = loss_weight.unsqueeze(-1)
+      diffusion_loss = diffusion_loss * loss_weight
+    
     assert diffusion_loss.ndim == 2
     return diffusion_loss
 
