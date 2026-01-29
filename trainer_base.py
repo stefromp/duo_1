@@ -30,7 +30,12 @@ class LogLinear(torch.nn.Module):
   def forward(self, t):
     t = (1 - self.eps) * t
     alpha_t = 1 - t 
-    dalpha_t = - (1 - self.eps)
+    # Ensure dalpha_t has the same type/device/shape as alpha_t so callers
+    # that expect a tensor (not a Python float) work correctly.
+    if torch.is_tensor(alpha_t):
+      dalpha_t = torch.full_like(alpha_t, - (1 - self.eps))
+    else:
+      dalpha_t = - (1 - self.eps)
     return dalpha_t, alpha_t
 
 
