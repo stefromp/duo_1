@@ -18,5 +18,5 @@ gamma_max: -1.75
 
 # Reweighted loss options (Shi & Titsias, 2025)
 # Options: 'elbo' (standard), 'simple' (best), 'fm', 'sigmoid', 'edm', 'iddpm'
-loss_weighting: elbo
+loss_weighting: simple
 sigmoid_k: 0.0  # Parameter k for sigmoid weighting (only used when loss_weighting=sigmoid)
