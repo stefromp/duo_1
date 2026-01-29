@@ -16,5 +16,5 @@ ignore_bos: False
 gamma_min: -3.5
 gamma_max: -1.75
 
-loss_weighting: sigmoid
+loss_weighting: simple
 sigmoid_k: 0.0  # Parameter k for sigmoid weighting (only used when loss_weighting=sigmoid)
