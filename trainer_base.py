@@ -1,4 +1,5 @@
 import itertools
+import math
 from dataclasses import dataclass
 
 import hydra.utils
@@ -12,6 +13,7 @@ import dataloader
 import metrics
 import models
 import utils
+import frequency_masking
 
 
 @dataclass
@@ -21,6 +23,10 @@ class Loss:
   prior_loss: torch.FloatTensor
   num_tokens: torch.FloatTensor
 
+
+# =============================================================================
+# Noise Schedules
+# =============================================================================
 
 class LogLinear(torch.nn.Module):
   def __init__(self):
@@ -36,6 +42,95 @@ class LogLinear(torch.nn.Module):
       dalpha_t = torch.full_like(alpha_t, - (1 - self.eps))
     else:
       dalpha_t = - (1 - self.eps)
+    return dalpha_t, alpha_t
+
+
+class CosineSchedule(torch.nn.Module):
+  """Cosine noise schedule: α_t = cos(π/2 * (1 - t))
+  
+  From "Masked Diffusion Language Models with Frequency-Informed Training"
+  (Kosmopoulou et al., 2025). This schedule concentrates masking rates at
+  lower values (expected mean ~0.36 vs 0.5 for linear), leading to better
+  performance on zero-shot tasks.
+  """
+  def __init__(self):
+    super().__init__()
+    self.eps = 1e-3
+  
+  def forward(self, t):
+    t = t.clamp(self.eps, 1.0 - self.eps)
+    # α_t = cos(π/2 * (1 - t))
+    alpha_t = torch.cos(math.pi / 2 * (1 - t))
+    # d(α_t)/dt = π/2 * sin(π/2 * (1 - t))
+    dalpha_t = math.pi / 2 * torch.sin(math.pi / 2 * (1 - t))
+    return dalpha_t, alpha_t
+
+
+class BimodalGaussianSchedule(torch.nn.Module):
+  """Bimodal Gaussian noise schedule with time-varying right mode.
+  
+  From "Masked Diffusion Language Models with Frequency-Informed Training"
+  (Kosmopoulou et al., 2025). Creates a mixture of two Gaussians:
+  - Left mode: Low masking rates (fine-grained learning)  
+  - Right mode: Higher masking rates that increase during training
+  
+  IMPORTANT: This schedule requires derivative softening (derivative_power < 1)
+  to achieve good performance. Use derivative_power=0.1 or 0.0.
+  """
+  def __init__(self, left_weight=0.6, left_mean=0.12, left_std=0.02,
+               right_mean_start=0.4, right_mean_end=0.85, right_std=0.08):
+    super().__init__()
+    self.left_weight = left_weight
+    self.left_mean = left_mean
+    self.left_std = left_std
+    self.right_mean_start = right_mean_start
+    self.right_mean_end = right_mean_end
+    self.right_std = right_std
+    self.eps = 1e-3
+    self._training_progress = 0.0
+  
+  def set_training_progress(self, progress):
+    """Update training progress (0 = start, 1 = end)."""
+    self._training_progress = min(max(progress, 0.0), 1.0)
+  
+  def _get_right_mean(self):
+    tau = self._training_progress * 3
+    return self.right_mean_start + (
+      self.right_mean_end - self.right_mean_start
+    ) * (1 - math.exp(-tau))
+  
+  def forward(self, t):
+    t = t.clamp(self.eps, 1.0 - self.eps)
+    
+    from torch.distributions import Normal
+    right_mean = self._get_right_mean()
+    
+    left_normal = Normal(self.left_mean, self.left_std)
+    right_normal = Normal(right_mean, self.right_std)
+    
+    # Randomly assign samples to components
+    use_left = torch.rand_like(t) < self.left_weight
+    
+    # Map uniform t to mask rate through inverse CDF
+    mask_rate = torch.where(
+      use_left,
+      left_normal.icdf(t.clamp(0.01, 0.99)),
+      right_normal.icdf(t.clamp(0.01, 0.99))
+    ).clamp(self.eps, 1.0 - self.eps)
+    
+    alpha_t = 1 - mask_rate
+    
+    # Approximate derivative numerically
+    delta = 1e-4
+    t_plus = (t + delta).clamp(self.eps, 1.0 - self.eps)
+    mask_rate_plus = torch.where(
+      use_left,
+      left_normal.icdf(t_plus.clamp(0.01, 0.99)),
+      right_normal.icdf(t_plus.clamp(0.01, 0.99))
+    ).clamp(self.eps, 1.0 - self.eps)
+    
+    dalpha_t = -(mask_rate_plus - mask_rate) / delta
+    
     return dalpha_t, alpha_t
 
 
@@ -91,8 +186,40 @@ class TrainerBase(L.LightningModule):
     self.num_tokens = self.config.model.length
     self.softplus = torch.nn.Softplus()
     self.p_nucleus = self.config.sampling.p_nucleus
-    # Noise Schedule
-    self.noise = LogLinear()
+    
+    # Noise Schedule - now configurable
+    noise_type = getattr(config.noise, 'type', 'log-linear')
+    if noise_type == 'cosine':
+      self.noise = CosineSchedule()
+    elif noise_type == 'bimodal-gaussian':
+      self.noise = BimodalGaussianSchedule(
+        left_weight=getattr(config.noise, 'left_weight', 0.6),
+        left_mean=getattr(config.noise, 'left_mean', 0.12),
+        left_std=getattr(config.noise, 'left_std', 0.02),
+        right_mean_start=getattr(config.noise, 'right_mean_start', 0.4),
+        right_mean_end=getattr(config.noise, 'right_mean_end', 0.85),
+        right_std=getattr(config.noise, 'right_std', 0.08),
+      )
+    else:  # log-linear (default)
+      self.noise = LogLinear()
+    
+    # ELBO derivative softening (from Kosmopoulou et al., 2025)
+    # power < 1 softens the derivative, power = 0 omits it entirely
+    self.derivative_power = getattr(config.algo, 'derivative_power', 1.0)
+    
+    # Frequency-informed masking (from Kosmopoulou et al., 2025)
+    self.use_frequency_masking = getattr(
+      config.algo, 'use_frequency_masking', False)
+    if self.use_frequency_masking:
+      freq_softening = getattr(config.algo, 'frequency_softening_power', 0.02)
+      freq_curriculum = getattr(config.algo, 'frequency_curriculum', True)
+      self.freq_masking = frequency_masking.create_frequency_masking_from_tokenizer(
+        tokenizer,
+        softening_power=freq_softening,
+        use_curriculum=freq_curriculum,
+      )
+    else:
+      self.freq_masking = None
 
     self.metrics = metrics.Metrics(
       gen_ppl_eval_model_name_or_path=\
@@ -259,6 +386,16 @@ class TrainerBase(L.LightningModule):
     self.metrics.reset()
     assert self.metrics.train_nlls.nll.mean_value == 0
     assert self.metrics.train_nlls.nll.weight == 0
+    
+    # Update frequency masking curriculum
+    if self.freq_masking is not None:
+      self.freq_masking.set_epoch(self.current_epoch)
+    
+    # Update bimodal Gaussian schedule training progress
+    if hasattr(self.noise, 'set_training_progress'):
+      max_epochs = getattr(self.trainer, 'max_epochs', 10) or 10
+      progress = self.current_epoch / max(max_epochs - 1, 1)
+      self.noise.set_training_progress(progress)
 
   def training_step(self, batch, batch_idx):
     current_accumulation_step = (
@@ -473,6 +610,13 @@ class Diffusion(TrainerBase):
     alpha_t = alpha_t.unsqueeze(-1)
     if torch.is_tensor(dalpha_t):
       dalpha_t = dalpha_t.unsqueeze(-1)
+    
+    # Apply derivative softening (from Kosmopoulou et al., 2025)
+    # This is especially important for bimodal Gaussian schedules
+    if self.derivative_power != 1.0 and torch.is_tensor(dalpha_t):
+      dalpha_t = frequency_masking.soften_derivative(
+        dalpha_t, power=self.derivative_power)
+    
     assert alpha_t.ndim == 2
     sigma = self._sigma_from_alphat(alpha_t)
 
@@ -638,9 +782,19 @@ class AbsorbingState(Diffusion):
       x: int torch.Tensor with shape (batch_size,
           diffusion_model_input_length), input. 
       alpha_t: float torch.Tensor with shape (batch_size, 1).
+    
+    If frequency-informed masking is enabled, rare tokens are
+    more likely to be masked (from Kosmopoulou et al., 2025).
     """
-    move_indices = torch.rand(
-      * x.shape, device=x.device) < 1 - alpha_t
+    if self.freq_masking is not None:
+      # Frequency-informed masking: bias toward rare tokens
+      target_mask_rate = 1 - alpha_t
+      move_indices = self.freq_masking.sample_mask(x, target_mask_rate)
+    else:
+      # Standard uniform masking
+      move_indices = torch.rand(
+        * x.shape, device=x.device) < 1 - alpha_t
+    
     xt = torch.where(move_indices, self.mask_index, x)
     if self.ignore_bos:
       xt[:, 0] = x[:, 0]
@@ -722,11 +876,21 @@ class UniformState(Diffusion):
     Args:
       x: int torch.Tensor with shape (batch_size,
           diffusion_model_input_length), input.
-      move_chance: float torch.Tensor with shape
+      alpha_t: float torch.Tensor with shape
         (batch_size, 1).
+    
+    If frequency-informed masking is enabled, rare tokens are
+    more likely to be replaced (from Kosmopoulou et al., 2025).
     """
-    move_indices = torch.rand(
-      *x.shape, device=x.device) < 1 - alpha_t
+    if self.freq_masking is not None:
+      # Frequency-informed masking: bias toward rare tokens
+      target_mask_rate = 1 - alpha_t
+      move_indices = self.freq_masking.sample_mask(x, target_mask_rate)
+    else:
+      # Standard uniform masking
+      move_indices = torch.rand(
+        *x.shape, device=x.device) < 1 - alpha_t
+    
     uniform_tensor = torch.randint(
       0, self.vocab_size, x.shape, device=x.device)
     xt = torch.where(move_indices, uniform_tensor, x)

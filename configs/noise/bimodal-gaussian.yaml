@@ -1,0 +1,23 @@
+# Bimodal Gaussian noise schedule configuration
+# From "Masked Diffusion Language Models with Frequency-Informed Training"
+# (Kosmopoulou et al., 2025)
+#
+# Creates a mixture of two Gaussians:
+# - Left mode: Low masking rates (fine-grained learning)
+# - Right mode: Higher masking rates that increase during training
+#
+# IMPORTANT: This schedule requires derivative softening to achieve
+# good performance. Set algo.derivative_power=0.1 or algo.derivative_power=0.0
+#
+# Use with: noise=bimodal-gaussian
+type: bimodal-gaussian
+
+# Left mode parameters (focused on low masking rates)
+left_weight: 0.6      # Weight of left mode in mixture
+left_mean: 0.12       # Mean masking rate for fine-grained learning
+left_std: 0.02        # Standard deviation
+
+# Right mode parameters (higher masking rates, time-varying)
+right_mean_start: 0.4   # Starting mean at epoch 0
+right_mean_end: 0.85    # Ending mean at final epoch
+right_std: 0.08         # Standard deviation

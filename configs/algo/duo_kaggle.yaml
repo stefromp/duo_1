@@ -1,4 +1,9 @@
-# DUO configuration optimized for Kaggle
+# =============================================================================
+# DUO configuration optimized for Kaggle with Frequency-Informed Training
+# Based on: "Masked Diffusion Language Models with Frequency-Informed Training"
+# (Kosmopoulou et al., 2025) - arXiv:2509.05056
+# =============================================================================
+
 name: duo
 backbone: dit
 parameterization: mean
@@ -16,5 +21,31 @@ ignore_bos: False
 gamma_min: -3.5
 gamma_max: -1.75
 
-loss_weighting: sigmoid
-sigmoid_k: 0.0  # Parameter k for sigmoid weighting (only used when loss_weighting=sigmoid)
+# Loss weighting options (Shi & Titsias, 2025)
+loss_weighting: simple
+sigmoid_k: 0.0
+
+# =========================================================================
+# Frequency-Informed Training Settings (Kosmopoulou et al., 2025)
+# These settings significantly improve model accuracy
+# =========================================================================
+
+# Enable frequency-informed masking
+# Rare tokens are more likely to be masked, improving learning efficiency
+use_frequency_masking: True
+
+# Softening power for frequency weights
+# Lower values (e.g., 0.02) prevent over-emphasis on extremely rare tokens
+# Paper recommends 0.02 with curriculum learning
+frequency_softening_power: 0.02
+
+# Enable curriculum learning for frequency masking
+# Starts with uniform masking (epoch 0) and gradually increases frequency bias
+# This provides a natural easy-to-hard curriculum
+frequency_curriculum: True
+
+# ELBO derivative softening power
+# - Use 1.0 for cosine or log-linear schedules (default)
+# - Use 0.1 or 0.0 for bimodal-gaussian schedule (CRITICAL!)
+# From paper: bimodal+softening achieves ~79% vs ~68% without softening
+derivative_power: 1.0

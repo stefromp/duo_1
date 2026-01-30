@@ -1,0 +1,57 @@
+# DUO with Frequency-Informed Training
+# Implements techniques from "Masked Diffusion Language Models with 
+# Frequency-Informed Training" (Kosmopoulou et al., 2025)
+#
+# Key improvements:
+# 1. Frequency-informed masking: Prioritizes learning from rare tokens
+# 2. Cosine noise schedule: Better zero-shot performance
+# 3. Derivative softening: Improves training with certain schedules
+# 4. Curriculum learning: Progressively focus on rare tokens
+#
+# Usage:
+#   python main.py algo=duo_frequency_informed noise=cosine ...
+
+name: duo
+backbone: dit  # dit / dimamba / hf_dit
+parameterization: mean
+time_conditioning: True
+T: 0  # 0 (continuous time) / 1000 
+subs_masking: False
+causal_attention: False
+gumbel_tau_log10_start: -1.0
+gumbel_tau_log10_end: -2.0
+curriculum_start: 100_000
+curriculum_end: 200_000
+integral_cache_path: ${hydra:runtime.cwd}/integral/${data.tokenizer_name_or_path}.pkl
+loss_type: elbo
+ignore_bos: False
+gamma_min: -3.5
+gamma_max: -1.75
+
+# Reweighted loss options (Shi & Titsias, 2025)
+loss_weighting: elbo
+sigmoid_k: 0.0
+
+# =========================================================================
+# Frequency-Informed Training Settings (Kosmopoulou et al., 2025)
+# =========================================================================
+
+# Enable frequency-informed masking
+# When True, rare tokens are more likely to be masked
+use_frequency_masking: True
+
+# Softening power for frequency weights
+# Lower values prevent over-emphasis on extremely rare tokens
+# Paper recommends p=0.02 with curriculum learning
+frequency_softening_power: 0.02
+
+# Enable curriculum learning for frequency masking
+# Progressively increases focus on rare tokens during training
+# Starts with uniform masking (p=0) and reaches frequency_softening_power
+frequency_curriculum: True
+
+# ELBO derivative softening power
+# power < 1.0 softens the derivative term, power = 0.0 omits it
+# Required for bimodal-gaussian schedule, optional for others
+# Paper shows best results with power=0.1 or 0.0 for bimodal
+derivative_power: 1.0  # Use 0.1 with bimodal-gaussian schedule

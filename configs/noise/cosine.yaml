@@ -1,0 +1,10 @@
+# Cosine noise schedule configuration
+# From "Masked Diffusion Language Models with Frequency-Informed Training"
+# (Kosmopoulou et al., 2025)
+#
+# The cosine schedule concentrates masking rates at lower values
+# (expected mean ~0.36 vs 0.5 for linear), leading to better
+# zero-shot performance.
+#
+# Use with: noise=cosine
+type: cosine
